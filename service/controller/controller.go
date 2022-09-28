@@ -19,6 +19,11 @@ import (
 	"github.com/xtls/xray-core/features/stats"
 )
 
+type LimitInfo struct {
+	end              int
+	originSpeedLimit uint64
+}
+
 type Controller struct {
 	server                  *core.Instance
 	config                  *Config
@@ -29,6 +34,8 @@ type Controller struct {
 	userList                *[]api.UserInfo
 	nodeInfoMonitorPeriodic *task.Periodic
 	userReportPeriodic      *task.Periodic
+	limitedUsers            map[api.UserInfo]LimitInfo
+	warnedUsers             map[api.UserInfo]int
 	panelType               string
 	ihm                     inbound.Manager
 	ohm                     outbound.Manager
@@ -409,6 +416,14 @@ func compareUserList(old, new *[]api.UserInfo) (deleted, added []api.UserInfo) {
 	return deleted, added
 }
 
+func silentUser(c *Controller, user api.UserInfo) {
+	c.limitedUsers[user] = LimitInfo{
+		end:              time.Now().Second() + c.config.IPLCSilentDuration*60,
+		originSpeedLimit: user.SpeedLimit,
+	}
+	user.SpeedLimit = c.config.IPLCSilentSpeedLimit * 1024 * 1024 / 8
+}
+
 func (c *Controller) userInfoMonitor() (err error) {
 	// Get server status
 	CPU, Mem, Disk, Uptime, err := serverstatus.GetSystemInfo()
@@ -425,6 +440,15 @@ func (c *Controller) userInfoMonitor() (err error) {
 	if err != nil {
 		log.Print(err)
 	}
+	// Unlock users
+	if c.config.IPLCSpeedLimit > 0 && len(c.limitedUsers) > 0 {
+		for user, limitInfo := range c.limitedUsers {
+			if time.Now().Second() > limitInfo.end {
+				user.SpeedLimit = limitInfo.originSpeedLimit
+				delete(c.limitedUsers, user)
+			}
+		}
+	}
 
 	// Get User traffic
 	var userTraffic []api.UserTraffic
@@ -433,6 +457,21 @@ func (c *Controller) userInfoMonitor() (err error) {
 	for _, user := range *c.userList {
 		up, down, upCounter, downCounter := c.getTraffic(c.buildUserTag(&user))
 		if up > 0 || down > 0 {
+			// Over speed users
+			if c.config.IPLCSpeedLimit > 0 {
+				if down > c.config.IPLCSpeedLimit*1024*1024*60/8 {
+					if c.config.IPLCCheckDuration == 1 { // 一分钟检查时直接限速
+						silentUser(c, user)
+					} else {
+						c.warnedUsers[user] += 1
+						if c.warnedUsers[user] >= c.config.IPLCCheckDuration {
+							silentUser(c, user)
+						}
+					}
+				} else {
+					delete(c.warnedUsers, user)
+				}
+			}
 			userTraffic = append(userTraffic, api.UserTraffic{
 				UID:      user.UID,
 				Email:    user.Email,

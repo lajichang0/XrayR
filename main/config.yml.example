@@ -34,6 +34,10 @@ Nodes:
       DNSType: AsIs # AsIs, UseIP, UseIPv4, UseIPv6, DNS strategy
       EnableProxyProtocol: false # Only works for WebSocket and TCP
       EnableFallback: false # Only support for Trojan and Vless
+      IPLCCheckDuration: 5      # Check duration on IPLC node (times)
+      IPLCSpeedLimit: 0         # SpeedLimit for IPLC node (mbps)
+      IPLCSilentSpeedLimit: 0   # Silent SpeedLimit for IPLC node (mbps)
+      IPLCSilentDuration: 1000  # Silent Duration for IPLC node (minutes)
       FallBackConfigs:  # Support multiple fallbacks
         -
           SNI: # TLS SNI(Server Name Indication), Empty for any
