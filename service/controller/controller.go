@@ -459,7 +459,7 @@ func (c *Controller) userInfoMonitor() (err error) {
 		if up > 0 || down > 0 {
 			// Over speed users
 			if c.config.IPLCSpeedLimit > 0 {
-				if down > c.config.IPLCSpeedLimit*1024*1024*60/8 {
+				if down > c.config.IPLCSpeedLimit*1024*1024*c.config.UpdatePeriodic/8 {
 					if c.config.IPLCCheckDuration == 1 { // 一分钟检查时直接限速
 						silentUser(c, user)
 					} else {
