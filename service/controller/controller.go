@@ -421,7 +421,7 @@ func silentUser(c *Controller, user api.UserInfo) {
 		end:              time.Now().Second() + c.config.IPLCSilentDuration*60,
 		originSpeedLimit: user.SpeedLimit,
 	}
-	user.SpeedLimit = c.config.IPLCSilentSpeedLimit * 1024 * 1024 / 8
+	user.SpeedLimit = uint64(c.config.IPLCSilentSpeedLimit) * 1024 * 1024 / 8
 }
 
 func (c *Controller) userInfoMonitor() (err error) {
@@ -459,7 +459,7 @@ func (c *Controller) userInfoMonitor() (err error) {
 		if up > 0 || down > 0 {
 			// Over speed users
 			if c.config.IPLCSpeedLimit > 0 {
-				if down > c.config.IPLCSpeedLimit*1024*1024*int64(c.config.UpdatePeriodic)/8 {
+				if down > int64(c.config.IPLCSpeedLimit)*1024*1024*int64(c.config.UpdatePeriodic)/8 {
 					if c.config.IPLCCheckDuration == 1 { // 一分钟检查时直接限速
 						silentUser(c, user)
 					} else {

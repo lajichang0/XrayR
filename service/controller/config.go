@@ -8,8 +8,8 @@ type Config struct {
 	EnableDNS            bool              `mapstructure:"EnableDNS"`
 	DNSType              string            `mapstructure:"DNSType"`
 	IPLCCheckDuration    int               `mapstructure:"IPLCCheckDuration"`    // minute
-	IPLCSpeedLimit       int64             `mapstructure:"IPLCSpeedLimit"`       // mbps
-	IPLCSilentSpeedLimit uint64            `mapstructure:"IPLCSilentSpeedLimit"` // mbps
+	IPLCSpeedLimit       int               `mapstructure:"IPLCSpeedLimit"`       // mbps
+	IPLCSilentSpeedLimit int               `mapstructure:"IPLCSilentSpeedLimit"` // mbps
 	IPLCSilentDuration   int               `mapstructure:"IPLCSilentDuration"`   // minute
 	DisableUploadTraffic bool              `mapstructure:"DisableUploadTraffic"`
 	DisableGetRule       bool              `mapstructure:"DisableGetRule"`
