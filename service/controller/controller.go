@@ -20,7 +20,7 @@ import (
 )
 
 type LimitInfo struct {
-	end              int
+	end              int64
 	originSpeedLimit uint64
 }
 
@@ -108,6 +108,10 @@ func (c *Controller) Start() error {
 	c.userReportPeriodic = &task.Periodic{
 		Interval: time.Duration(c.config.UpdatePeriodic) * time.Second,
 		Execute:  c.userInfoMonitor,
+	}
+	if c.config.IPLCSpeedLimit > 0 {
+		c.limitedUsers = make(map[api.UserInfo]LimitInfo)
+		c.warnedUsers = make(map[api.UserInfo]int)
 	}
 	log.Printf("[%s: %d] Start monitor node status", c.nodeInfo.NodeType, c.nodeInfo.NodeID)
 	// delay to start nodeInfoMonitor
@@ -416,12 +420,14 @@ func compareUserList(old, new *[]api.UserInfo) (deleted, added []api.UserInfo) {
 	return deleted, added
 }
 
-func silentUser(c *Controller, user api.UserInfo) {
+func silentUser(c *Controller, user api.UserInfo, silentUsers *[]api.UserInfo) {
 	c.limitedUsers[user] = LimitInfo{
-		end:              time.Now().Second() + c.config.IPLCSilentDuration*60,
+		end:              time.Now().Unix() + int64(c.config.IPLCSilentDuration*60),
 		originSpeedLimit: user.SpeedLimit,
 	}
+	log.Printf("%s will be limited to %d until %d. Now time is %d", user.Email, user.SpeedLimit, c.limitedUsers[user].end, time.Now().Unix())
 	user.SpeedLimit = uint64(c.config.IPLCSilentSpeedLimit) * 1024 * 1024 / 8
+	*silentUsers = append(*silentUsers, user)
 }
 
 func (c *Controller) userInfoMonitor() (err error) {
@@ -442,10 +448,20 @@ func (c *Controller) userInfoMonitor() (err error) {
 	}
 	// Unlock users
 	if c.config.IPLCSpeedLimit > 0 && len(c.limitedUsers) > 0 {
+		toReleaseUsers := make([]api.UserInfo, 0)
 		for user, limitInfo := range c.limitedUsers {
-			if time.Now().Second() > limitInfo.end {
+			if time.Now().Unix() > limitInfo.end {
 				user.SpeedLimit = limitInfo.originSpeedLimit
+				toReleaseUsers = append(toReleaseUsers, user)
+				log.Printf("%s has been set to %d at %d. Now time is %d", user.Email, limitInfo.originSpeedLimit, limitInfo.end, time.Now().Unix())
 				delete(c.limitedUsers, user)
+			} else {
+				log.Printf("%s will be set to %d at %d. Now time is %d", user.Email, limitInfo.originSpeedLimit, limitInfo.end, time.Now().Unix())
+			}
+		}
+		if len(toReleaseUsers) > 0 {
+			if err := c.UpdateInboundLimiter(c.Tag, &toReleaseUsers); err != nil {
+				log.Print(err)
 			}
 		}
 	}
@@ -454,18 +470,23 @@ func (c *Controller) userInfoMonitor() (err error) {
 	var userTraffic []api.UserTraffic
 	var upCounterList []stats.Counter
 	var downCounterList []stats.Counter
+	IPLCSpeedLimit := int64(c.config.IPLCSpeedLimit)
+	UpdatePeriodic := int64(c.config.UpdatePeriodic)
+	silentUsers := make([]api.UserInfo, 0)
 	for _, user := range *c.userList {
 		up, down, upCounter, downCounter := c.getTraffic(c.buildUserTag(&user))
 		if up > 0 || down > 0 {
 			// Over speed users
 			if c.config.IPLCSpeedLimit > 0 {
-				if down > int64(c.config.IPLCSpeedLimit)*1024*1024*int64(c.config.UpdatePeriodic)/8 {
-					if c.config.IPLCCheckDuration == 1 { // 一分钟检查时直接限速
-						silentUser(c, user)
-					} else {
-						c.warnedUsers[user] += 1
-						if c.warnedUsers[user] >= c.config.IPLCCheckDuration {
-							silentUser(c, user)
+				if down > IPLCSpeedLimit*1024*1024*UpdatePeriodic/8 {
+					if _, ok := c.limitedUsers[user]; !ok {
+						if c.config.IPLCCheckDuration == 1 { // 一分钟检查时直接限速
+							silentUser(c, user, &silentUsers)
+						} else {
+							c.warnedUsers[user] += 1
+							if c.warnedUsers[user] >= c.config.IPLCCheckDuration {
+								silentUser(c, user, &silentUsers)
+							}
 						}
 					}
 				} else {
@@ -484,6 +505,11 @@ func (c *Controller) userInfoMonitor() (err error) {
 			if downCounter != nil {
 				downCounterList = append(downCounterList, downCounter)
 			}
+		}
+	}
+	if len(silentUsers) > 0 {
+		if err := c.UpdateInboundLimiter(c.Tag, &silentUsers); err != nil {
+			log.Print(err)
 		}
 	}
 	if len(userTraffic) > 0 {
